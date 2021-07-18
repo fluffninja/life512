@@ -16,4 +16,4 @@ run: boot.img
 	qemu-system-i386 \
     		-monitor stdio \
     		-m 1M \
-		-drive media=disk,format=raw,file=boot.img
+		-drive media=disk,format=raw,file=$<
