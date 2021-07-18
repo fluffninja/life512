@@ -1,191 +1,190 @@
     bits 16
     org 0x7c00
-    global Main
 
 
-Main:
-    jmp     0:Main.Norm
-.Norm:
+Start:
+    ; Normalise CS:IP to 0:7C00.
+    jmp     0:Start.NormaliseCSIP
+.NormaliseCSIP:
+
+    ; Have stack grow downwards below the bootloader.
     xor     ax, ax
     mov     ss, ax
     mov     sp, 0x7c00
 
-    ; Set Video Mode
-    mov     al, 0x13
+
+    ; Initialise world.
+    ; Use the BIOS ROM bytes (at F'0000) as the intial world state.
+    xor     ah, 0xf0
+    mov     ds, ax
+    xor     si, si
+
+    mov     ah, 0x10
+    mov     es, ax
+    xor     di, di
+
+    mov     cx, 256 * 256 / 2
+
+.InitLoop:
+    lodsw
+    and     ax, 0x0101
+    stosw
+
+    loop    .InitLoop
+
+
+    ; Set graphics mode to 320x200 VGA.
+    mov     ax, 0x0013
     int     0x10
 
 
-    ; Initialise board.
-    mov     ax, 0x1000
-    mov     es, ax
-
-    xor     di, di
-    mov     cx, 256 * 256
-.Body:
-    mov     ax, cx
-    shr     ax, 1
-    and     ax, 1
-    stosb
-    loop    .Body
-
-
-MainLoop:
+    ; Main loop.
+    ; cx = Segment containing world data for current step.
+    ; dx = Segment containing world data for next step.
     mov     cx, 0x1000
     mov     dx, 0x2000
-.Body:
+
+.MainLoop:
     mov     ds, cx
     mov     es, dx
+
     push    cx
     push    dx
     call    TickAndRender
-    pop     dx
+
+    ; Pop in reverse order to swap the world data.
     pop     cx
-    xchg    cx, dx
-    jmp     .Body
+    pop     dx
+
+    ; Delay by waiting for the timer interrupt.
+    hlt
+
+    jmp     .MainLoop
 
 
 TickAndRender:
-    ; cl = X
-    ; ch = Y
+    ; Params:
+    ;   DS - World data for current step.
+    ;   ES - World data for next step.
+    ; Locals:
+    ;   CL - World X coord.
+    ;   CH - World Y coord.
+    ;   DI - Cell index in next step world data.
+    ;   BX - Memory access.
+    ;   AX, DX, SI - Scratch.
     xor     cx, cx
-    xor     bp, bp
-    jmp     .YCond
+    xor     di, di
 
 .Body:
-    push    cx
-
-    ; al = neighbour count
+    ; AL - Live neighbour count.
+    ; AH - Current cell state.
     xor     ax, ax
 
+    ; BL and BH are current cell X and Y.
+    ; Use INC and DEC to get neighbours.
+    ; Rely on integer overflow to make world wrap at borders.
     mov     bx, cx
 
-    ; Previous row:
-    ; bh = Y - 1
+    ; Row above.
     dec     bh
-
     dec     bl
     add     al, [bx]
-
+    inc     bl
+    add     al, [bx]
     inc     bl
     add     al, [bx]
 
-    inc     bl
-    add     al, [bx]
-
-    ; Current row:
-    ; bh = Y
+    ; Current row.
     inc     bh
-
     add     al, [bx]
-
     dec     bl
-    mov     ah, [bx]   ; ah = Current
-
+    mov     ah, [bx]
     dec     bl
     add     al, [bx]
 
-    ; Next row:
-    ; bh = Y + 1
+    ; Row below.
     inc     bh
-
     add     al, [bx]
-
+    inc     bl
+    add     al, [bx]
     inc     bl
     add     al, [bx]
 
-    inc     bl
-    add     al, [bx]
-
-    ; Calculate next state.
+    ; Evaluate next state.
     test    ah, ah
     jz      .CurrentlyDead
-
-
-.CurrentlyAlive:
+.CurrentlyLive:
     cmp     al, 2
     je      .RemainLive
     cmp     al, 3
     je      .RemainLive
-
     jmp     .BecomeDead
-
-
 .CurrentlyDead:
     cmp     al, 3
     je      .BecomeLive
-
     jmp     .RemainDead
-
-
 .RemainLive:
 .BecomeLive:
     mov     al, 1
-    jmp     .After
-
-
+    jmp     .Done
 .RemainDead:
 .BecomeDead:
     mov     al, 0
+.Done:
 
+    ; Write next state to ES:DI.
+    stosb
 
-.After:
-
-
-    ; Set next state.
-    mov     [es:bp], al
-    inc     bp
-
-    ; Set pixel colour.
-    mov     al, 0
+    ; Choose pixel colour.
+    mov     al, 0x01
     test    ah, ah
     jz      .Dead
-    mov     al, 0xf
+    mov     al, 0x0f
 .Dead:
 
+    ; Set pixel...
+
+    ; Skip if Y is off-screen.
     cmp     ch, 28
-    jb      .Skip
-
+    jb      .NoDraw
     cmp     ch, 228
-    jae     .Skip
+    jae     .NoDraw
 
+    ; Save AX.
+    mov     si, ax
 
-    ; Set pixel
-    push    ax
-
+    ; Calculate pixel offset.
     movzx   ax, ch
     add     ax, (200 - 256) / 2
-
     mov     dx, 320
     mul     dx
-
     movzx   dx, cl
     add     ax, dx
     add     ax, (320 - 256) / 2
     mov     bx, ax
 
-    pop     ax
+    ; Recall AX.
+    mov     ax, si
 
-    push    ds
+    ; Save DS.
+    mov     si, ds
+
+    ; Put pixel.
     mov     dx, 0xa000
     mov     ds, dx
     mov     [bx], al
-    pop     ds
-.Skip:
 
+    ; Recall DS.
+    mov     ds, si
+.NoDraw:
 
-    pop     cx
-    inc     cl
+    ; Increment X with carry.
+    add     cl, 1
+    jnc     .Body
 
-.XCond:
-    cmp     cl, 0xff
-    jb      .Body
-
-    mov     cl, cl
-    inc     ch
-
-.YCond:
-    cmp     ch, 0xff
-    jb      .Body
+    ; Increment Y with carry.
+    add     ch, 1
+    jnc     .Body
 
     ret
 
