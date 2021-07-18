@@ -17,3 +17,7 @@ run: boot.img
     		-monitor stdio \
     		-m 1M \
 		-drive media=disk,format=raw,file=$<
+
+.PHONY:
+dump: boot.bin
+	objdump -D $< -b binary -m i8086 -M intel
