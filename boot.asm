@@ -151,7 +151,7 @@ TickAndRender:
     jae     .NoDraw
 
     ; Save AX.
-    mov     si, ax
+    mov     bx, ax
 
     ; Calculate pixel offset.
     movzx   ax, ch
@@ -161,10 +161,7 @@ TickAndRender:
     movzx   dx, cl
     add     ax, dx
     add     ax, (320 - 256) / 2
-    mov     bx, ax
-
-    ; Recall AX.
-    mov     ax, si
+    mov     bp, ax
 
     ; Save DS.
     mov     si, ds
@@ -172,19 +169,15 @@ TickAndRender:
     ; Put pixel.
     mov     dx, 0xa000
     mov     ds, dx
-    mov     [bx], al
+    mov     [ds:bp], bl
 
     ; Recall DS.
     mov     ds, si
 .NoDraw:
 
-    ; Increment X with carry.
-    add     cl, 1
-    jnc     .Body
-
-    ; Increment Y with carry.
-    add     ch, 1
-    jnc     .Body
+    inc     cx
+    test    cx, cx
+    jnz     .Body
 
     ret
 
