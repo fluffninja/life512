@@ -20,7 +20,7 @@ Main:
     mov     es, ax
 
     xor     di, di
-    mov     cx, 256 * 128
+    mov     cx, 256 * 256
 .Body:
     mov     ax, cx
     shr     ax, 1
@@ -57,43 +57,47 @@ TickAndRender:
     ; al = neighbour count
     xor     ax, ax
 
-    ; Current row:
-    ; bl = X
-    ; bh = Y
     mov     bx, cx
-
-    dec     bl
-    add     al, [bx]
-    inc     bl
-    mov     dl, [bx]   ; dl = Current
-    inc     bl
-    add     al, [bx]
 
     ; Previous row:
     ; bh = Y - 1
-    ; bh already Y
     dec     bh
-    and     bh, 0x7f
 
-    add     al, [bx]
     dec     bl
     add     al, [bx]
+
+    inc     bl
+    add     al, [bx]
+
+    inc     bl
+    add     al, [bx]
+
+    ; Current row:
+    ; bh = Y
+    inc     bh
+
+    add     al, [bx]
+
+    dec     bl
+    mov     ah, [bx]   ; ah = Current
+
     dec     bl
     add     al, [bx]
 
     ; Next row:
     ; bh = Y + 1
     inc     bh
-    inc     bh
-    and     bh, 0x7f
 
     add     al, [bx]
-    inc     bl
-    add     al, [bx]
+
     inc     bl
     add     al, [bx]
 
-    test    dl, dl
+    inc     bl
+    add     al, [bx]
+
+    ; Calculate next state.
+    test    ah, ah
     jz      .CurrentlyDead
 
 
@@ -132,21 +136,33 @@ TickAndRender:
     inc     bp
 
     ; Set pixel colour.
-    test    dl, dl
     mov     al, 0
+    test    ah, ah
     jz      .Dead
     mov     al, 0xf
 .Dead:
 
+    cmp     ch, 28
+    jb      .Skip
+
+    cmp     ch, 228
+    jae     .Skip
+
 
     ; Set pixel
     push    ax
+
     movzx   ax, ch
+    add     ax, (200 - 256) / 2
+
     mov     dx, 320
     mul     dx
+
     movzx   dx, cl
     add     ax, dx
+    add     ax, (320 - 256) / 2
     mov     bx, ax
+
     pop     ax
 
     push    ds
@@ -154,6 +170,7 @@ TickAndRender:
     mov     ds, dx
     mov     [bx], al
     pop     ds
+.Skip:
 
 
     pop     cx
@@ -167,7 +184,7 @@ TickAndRender:
     inc     ch
 
 .YCond:
-    cmp     ch, 0x7f
+    cmp     ch, 0xff
     jb      .Body
 
     ret
