@@ -1,44 +1,56 @@
     bits 16
     org 0x7c00
 
+    ; Key Memory Addresses:
+    ;   0'0000:0'7BFF - Stack.
+    ;   0'7C00:0'7DFF - This Code.
+    ;   1'0000:1'FFFF - World State A.
+    ;   2'0000:2'FFFF - World State B.
+    ;   A'0000:A'FFFF - VGA VRAM.
+    ;   F'0000:F'FFFF - BIOS ROM.
 
 Start:
-    ; Normalise CS:IP to 0:7C00.
-    jmp     0:Start.NormaliseCSIP
-.NormaliseCSIP:
+    cli
 
-    ; Have stack grow downwards below the bootloader.
+    ; Normalise CS:IP to 0:7C00.
+    jmp     0:Start._NormaliseCSIP
+._NormaliseCSIP:
+
     xor     ax, ax
     mov     ss, ax
     mov     sp, 0x7c00
 
-
-    ; Initialise world.
-    ; Use the BIOS ROM bytes (at F'0000) as the intial world state.
-    xor     ah, 0xf0
-    mov     ds, ax
-    xor     si, si
-
-    mov     ah, 0x10
-    mov     es, ax
-    xor     di, di
-
-    mov     cx, 256 * 256 / 2
-
-.InitLoop:
-    lodsw
-    and     ax, 0x0101
-    stosw
-
-    loop    .InitLoop
-
-
+    sti
+    
     ; Set graphics mode to 320x200 VGA.
     mov     ax, 0x0013
     int     0x10
 
 
-    ; Main loop.
+    ; Initialise world
+    ; ================
+    ; To provide some interesting initial state values, copy the raw content of
+    ; the BIOS ROM (F'0000) into World State A (1'0000).
+
+    mov     ax, 0xf000
+    mov     ds, ax
+    xor     si, si
+
+    mov     ax, 0x1000
+    mov     es, ax
+    xor     di, di
+
+    mov     cx, (256 * 256) / 2     ; Copy in word-sized units.
+
+.InitLoop:
+    lodsw
+    and     ax, 0x0101              ; Only use the bottom list of each byte.
+    stosw
+    loop    .InitLoop
+
+
+    ; Main loop
+    ; =========
     ; cx = Segment containing world data for current step.
     ; dx = Segment containing world data for next step.
     mov     cx, 0x1000
@@ -136,18 +148,18 @@ TickAndRender:
     stosb
 
     ; Choose pixel colour.
-    mov     al, 0x01
+    mov     al, 0x01                ; Dead.
     test    ah, ah
     jz      .Dead
-    mov     al, 0x0f
+    mov     al, 0x0f                ; Live.
 .Dead:
 
     ; Set pixel...
 
     ; Skip if Y is off-screen.
-    cmp     ch, 28
+    cmp     ch, (256 - 200) / 2
     jb      .NoDraw
-    cmp     ch, 228
+    cmp     ch, 256 - (256 - 200) / 2
     jae     .NoDraw
 
     ; Save AX.
@@ -182,5 +194,5 @@ TickAndRender:
     ret
 
 
-times 512 - ($ - $$) - 2 db 0
-dw 0xaa55
+    times (512 - ($ - $$) - 2) db 0
+    dw 0xaa55
