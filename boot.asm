@@ -13,40 +13,78 @@
 
 %define WORLD_WIDTH             256
 %define WORLD_HEIGHT            256
-%define VIDEO_WIDTH             320
-%define VIDEO_HEIGHT            200
+%define VIDEO_WIDTH             640
+%define VIDEO_HEIGHT            480
 %define VRAM_SEGMENT            0xA000
-%define BIOS_SEGMENT            0xF000
 
     ; Configurable:
 
+%define INITIAL_SP              0x7c00
 %define STATE_A_SEGMENT         0x1000
 %define STATE_B_SEGMENT         0x2000
-%define DEAD_COLOUR             0x01
-%define LIVE_COLOUR             0x0f
+%define DEAD_COLOUR             0x131418
+%define LIVE_COLOUR             0xFFEE58
+
+
+%macro LOAD_STANDARD_SS 0
+    xor     ax, ax
+    mov     ss, ax
+%endmacro
+
 
 Start:
     cli
+    jmp     0:Main
 
-    ; Normalise CS:IP to 0:7C00.
-    jmp     0:Start._NormaliseCSIP
-._NormaliseCSIP:
 
-    xor     ax, ax
-    mov     ss, ax
-    mov     sp, 0x7c00
-
-    ; Set graphics mode to 320x200 VGA.
-    mov     ax, 0x0013
+InitVGA:
+    ; Use graphics mode 0x11: 640x480 monochrome.
+    mov     ax, 0x11
     int     0x10
 
+    PORT_VGA_DAC_INDEX equ 0x03c8
+    PORT_VGA_DAC_VALUE equ 0x03c9
 
-    ; Initialise world
-    ; ================
+    COLOUR_1_DAC_INDEX equ 0
+    COLOUR_1_DAC_VALUE equ DEAD_COLOUR
+
+    COLOUR_2_DAC_INDEX equ 63
+    COLOUR_2_DAC_VALUE equ LIVE_COLOUR
+
+    ; Reprogram colour 1.
+    mov     dx, PORT_VGA_DAC_INDEX
+    mov     al, COLOUR_1_DAC_INDEX
+    out     dx, al
+
+    mov     dx, PORT_VGA_DAC_VALUE
+    mov     al, 0x3f & (COLOUR_1_DAC_VALUE >> 18)
+    out     dx, al
+    mov     al, 0x3f & (COLOUR_1_DAC_VALUE >> 10)
+    out     dx, al
+    mov     al, 0x3f & (COLOUR_1_DAC_VALUE >> 2)
+    out     dx, al
+
+    ; Reprogram colour 2.
+    mov     dx, PORT_VGA_DAC_INDEX
+    mov     al, COLOUR_2_DAC_INDEX
+    out     dx, al
+
+    mov     dx, PORT_VGA_DAC_VALUE
+    mov     al, 0x3f & (COLOUR_2_DAC_VALUE >> 18)
+    out     dx, al
+    mov     al, 0x3f & (COLOUR_2_DAC_VALUE >> 10)
+    out     dx, al
+    mov     al, 0x3f & (COLOUR_2_DAC_VALUE >> 2)
+    out     dx, al
+
+    ret
+
+
+InitWorld:
     ; To provide some interesting initial state values, copy the raw content of
-    ; the BIOS ROM (F'0000) into World State A (1'0000).
+    ; the BIOS ROM (F'0000) into the current world state segment.
 
-    mov     ax, BIOS_SEGMENT
+    mov     ax, 0xF000
     mov     ds, ax
     xor     si, si
 
@@ -56,25 +94,37 @@ Start:
 
     mov     cx, (WORLD_WIDTH * WORLD_HEIGHT) / 2
 
-.InitLoop:
+.Loop:
     lodsw
-    and     ax, 0x0101              ; Only use the bottom list of each byte.
+    and     ax, 0x0101
     stosw
-    loop    .InitLoop
+
+    loop    .Loop
+
+    ret
 
 
-    ; Main loop
-    ; =========
-    ; cx = Segment containing world data for current step.
-    ; dx = Segment containing world data for next step.
+Main:
+    ; Set up stack.
+    LOAD_STANDARD_SS
+    mov     sp, INITIAL_SP
+
+    call    InitVGA
+    call    InitWorld
+
+    ; CX = Segment containing world state for current time-step.
+    ; DX = Segment containing world state the next time-step.
+
     mov     cx, STATE_A_SEGMENT
     mov     dx, STATE_B_SEGMENT
 
 .MainLoop:
     mov     ds, cx
     mov     es, dx
+
     call    TickAndRender
 
+    ; Swap segments.
     mov     cx, es
     mov     dx, ds
 
@@ -87,18 +137,37 @@ Start:
 
 
 TickAndRender:
-    ; Params:
-    ;   DS - World data for current step.
-    ;   ES - World data for next step.
-    ;   SS - VGA VRAM.
-    ; Locals:
-    ;   CL - World X coord.
-    ;   CH - World Y coord.
-    ;   DI - Cell index in next step world data.
-    ;   BX, BP - Memory access.
-    ;   AX, DX, SI - Scratch.
+    ; Parameters:
+    ;   DS - World state for current time-step (read from).
+    ;   ES - World state for next time-step (written to).
+    ;
+    ; Register Usage:
+    ;   SS - VGA RAM.
+    ;   BP - Memory access for SS.
+    ;   BX - Memory access for DS.
+    ;       BL - Cell X co-ordinate.
+    ;       BH - Cell Y co-ordinate.
+    ;   CX - Current cell location.
+    ;       CL - Cell X co-ordinate.
+    ;       CH - Cell Y co-ordinate.
+    ;   DI - Memory access for ES.
+    ;   AX - Arithmetic/scratch.
+    ;   DX - Arithmetic/scratch.
+    ;
+    ; Notes:
+    ;   This function does not make use of the stack, so the stack segment is
+    ;   repurposed as a third data segment to provide VRAM access.
+    ;
+    ;   The world is 256 by 256, with each cell represented as a single byte.
+    ;   While not necessarily the most efficient in terms of space, it allows
+    ;   us to use some tricks to speed up execution: if a cell's index in the
+    ;   world state (0..256^2-1) is stored in the combined X register, then
+    ;   the L and H subregisters _automatically_ contain that cell's X and Y
+    ;   co-ordinates respectively. A correct raster scan is achieved just by
+    ;   incrementing the X register. Performing arithmetic on the L and H
+    ;   registers separately provides wrap-around at the edges of the world.
+    ;
 
-    ; This function doesn't use the stack, so use SS as a third data segment.
     mov     ax, VRAM_SEGMENT
     mov     ss, ax
 
@@ -106,99 +175,123 @@ TickAndRender:
     xor     di, di
 
 .LoopCells:
-    ; AL - Live neighbour count.
-    ; AH - Current cell state.
+
+    ; AL = Live neighbour count.
+    ; AH = Current cell state.
     xor     ax, ax
 
-    ; BL and BH are current cell X and Y.
-    ; Rely on integer overflow to make world wrap at borders.
+    ; BL = Cell X.
+    ; BH = Cell Y.
     mov     bx, cx
 
-    ; Row above.
+    ; Count live cells above.
     dec     bh
     add     al, [bx - 1]
     add     al, [bx]
     add     al, [bx + 1]
 
-    ; Current row.
+    ; Count live cells on current row.
     inc     bh
     add     al, [bx - 1]
     mov     ah, [bx]                ; Current cell.
     add     al, [bx + 1]
 
-    ; Row below.
+    ; Count live cells below.
     inc     bh
     add     al, [bx - 1]
     add     al, [bx]
     add     al, [bx + 1]
 
-    ; Evaluate next state.
+    ; AL = Next state.
     test    ah, ah
     jz      .CurrentlyDead
+
 .CurrentlyLive:
     cmp     al, 2
     je      .RemainLive
+
     cmp     al, 3
     je      .RemainLive
+
     jmp     .BecomeDead
+
 .CurrentlyDead:
     cmp     al, 3
     je      .BecomeLive
+
     jmp     .RemainDead
+
 .RemainLive:
 .BecomeLive:
     mov     al, 1
-    jmp     .Done
+    jmp     .WriteNextState
+
 .RemainDead:
 .BecomeDead:
     mov     al, 0
-.Done:
 
-    ; Write next state to ES:DI.
+.WriteNextState:
+
+    ; Write next state to ES:DI and increment DI.
     stosb
 
-    ; Choose pixel colour.
-    mov     al, DEAD_COLOUR
-    test    ah, ah
-    jz      .Dead
-    mov     al, LIVE_COLOUR
-.Dead:
 
-    ; Set pixel...
+    ; BL = State to draw (current cell state).
+    mov     bl, ah
 
-    ; Skip if Y is off-screen.
-    cmp     ch, (WORLD_HEIGHT - VIDEO_HEIGHT) / 2
-    jb      .NoDraw
-    cmp     ch, WORLD_HEIGHT - (WORLD_HEIGHT - VIDEO_HEIGHT) / 2
-    jae     .NoDraw
-
-    ; Save AX.
-    mov     bx, ax
-
-    ; Calculate pixel offset.
+    ; BP = Pixel byte offset.
     movzx   ax, ch
     add     ax, (VIDEO_HEIGHT - WORLD_HEIGHT) / 2
-    mov     dx, VIDEO_WIDTH
+    mov     dx, VIDEO_WIDTH / 8
     mul     dx
+
     movzx   dx, cl
+    add     dx, (VIDEO_WIDTH - WORLD_WIDTH) / 2
+    shr     dx, 3
     add     ax, dx
-    add     ax, (VIDEO_WIDTH - WORLD_WIDTH) / 2
+
     mov     bp, ax
 
-    ; Put pixel.
-    mov     [ss:bp], bl
-.NoDraw:
+    ; Save CX.
+    mov     dx, cx
 
+    ; AL = Bitmask.
+    mov     al, 1
+    and     cl, 7
+    shl     al, cl
+
+    ; AH = Current pixel value.
+    mov     ah, [ss:bp]
+
+    ; Set or unset bit in AH.
+    test    bl, bl
+    jnz     .SetLive
+
+    not     al
+    and     ah, al
+    jmp     .WritePixel
+
+.SetLive:
+    or      ah, al
+
+.WritePixel:
+    ; Write back AH.
+    mov     [ss:bp], ah
+
+    ; Restore CX.
+    mov     cx, dx
+
+    ; Next cell.
     inc     cx
     test    cx, cx
     jnz     .LoopCells
 
     ; Restore stack segment.
-    xor     ax, ax
-    mov     ss, ax
+    LOAD_STANDARD_SS
 
     ret
 
 
+    ; Pad to 512 bytes, with the final 2 bytes being the boot signature.
     times (512 - ($ - $$) - 2) db 0
     dw 0xaa55
