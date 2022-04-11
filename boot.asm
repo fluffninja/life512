@@ -256,9 +256,9 @@ TickAndRender:
     mov     dx, cx
 
     ; AL = Bitmask.
-    mov     al, 1
+    mov     al, 0x80
     and     cl, 7
-    shl     al, cl
+    shr     al, cl
 
     ; AH = Current pixel value.
     mov     ah, [ss:bp]
