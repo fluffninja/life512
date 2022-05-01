@@ -9,14 +9,6 @@
     ;   A'0000..A'FFFF - VGA VRAM.
     ;   F'0000..F'FFFF - BIOS ROM.
 
-    ; Non-configurable:
-
-%define WORLD_WIDTH             256
-%define WORLD_HEIGHT            256
-%define VIDEO_WIDTH             640
-%define VIDEO_HEIGHT            480
-%define VRAM_SEGMENT            0xA000
-
     ; Configurable:
 
 %define INITIAL_SP              0x7c00
@@ -24,6 +16,23 @@
 %define STATE_B_SEGMENT         0x2000
 %define DEAD_COLOUR             0x131418
 %define LIVE_COLOUR             0xFFEE58
+%define STEPS_PER_SECOND        20
+
+    ; Non-configurable:
+
+%define WORLD_WIDTH             256
+%define WORLD_HEIGHT            256
+%define VIDEO_WIDTH             640
+%define VIDEO_HEIGHT            480
+%define VRAM_SEGMENT            0xA000
+%define BIOS_ROM_SEGMENT        0xF000
+
+    ; The hardware interrupt timer has a frequency of 1193180 Hz. The maximum
+    ; frequency divisor value we can set is 65535, which produces a timer
+    ; frequency of approximately 18 Hz. By waiting for 18 timer interrupts in
+    ; between each frame, we can act as if the timer actually has a frequency
+    ; of around 65535 instead, which makes the calculation much simpler:
+%define CLOCK_DIVISOR           0xffff / STEPS_PER_SECOND
 
 
 %macro LOAD_STANDARD_SS 0
@@ -38,43 +47,38 @@ Start:
 
 
 InitVGA:
-    ; Use graphics mode 0x11: 640x480 monochrome.
+    ; Use graphics mode 0x11: 640x480 monochrome (2-colour).
     mov     ax, 0x11
     int     0x10
 
-    PORT_VGA_DAC_INDEX equ 0x03c8
-    PORT_VGA_DAC_VALUE equ 0x03c9
-
-    COLOUR_1_DAC_INDEX equ 0
-    COLOUR_1_DAC_VALUE equ DEAD_COLOUR
-
-    COLOUR_2_DAC_INDEX equ 63
-    COLOUR_2_DAC_VALUE equ LIVE_COLOUR
+    ; Reprogram the colour palette in the VGA DAC. Each RGB channel is 6-bit.
+    ; For simplicity, our constants are defined as 8-bit RGB, so disgard the
+    ; bottom 2 bits of each channel.
 
     ; Reprogram colour 1.
-    mov     dx, PORT_VGA_DAC_INDEX
-    mov     al, COLOUR_1_DAC_INDEX
+    mov     dx, 0x03c8
+    mov     al, 0
     out     dx, al
 
-    mov     dx, PORT_VGA_DAC_VALUE
-    mov     al, 0x3f & (COLOUR_1_DAC_VALUE >> 18)
+    mov     dx, 0x03c9
+    mov     al, 0x3f & (DEAD_COLOUR >> 18)
     out     dx, al
-    mov     al, 0x3f & (COLOUR_1_DAC_VALUE >> 10)
+    mov     al, 0x3f & (DEAD_COLOUR >> 10)
     out     dx, al
-    mov     al, 0x3f & (COLOUR_1_DAC_VALUE >> 2)
+    mov     al, 0x3f & (DEAD_COLOUR >> 2)
     out     dx, al
 
     ; Reprogram colour 2.
-    mov     dx, PORT_VGA_DAC_INDEX
-    mov     al, COLOUR_2_DAC_INDEX
+    mov     dx, 0x03c8
+    mov     al, 63
     out     dx, al
 
-    mov     dx, PORT_VGA_DAC_VALUE
-    mov     al, 0x3f & (COLOUR_2_DAC_VALUE >> 18)
+    mov     dx, 0x03c9
+    mov     al, 0x3f & (LIVE_COLOUR >> 18)
     out     dx, al
-    mov     al, 0x3f & (COLOUR_2_DAC_VALUE >> 10)
+    mov     al, 0x3f & (LIVE_COLOUR >> 10)
     out     dx, al
-    mov     al, 0x3f & (COLOUR_2_DAC_VALUE >> 2)
+    mov     al, 0x3f & (LIVE_COLOUR >> 2)
     out     dx, al
 
     ret
@@ -82,9 +86,8 @@ InitVGA:
 
 InitWorld:
     ; To provide some interesting initial state values, copy the raw content of
-    ; the BIOS ROM (F'0000) into the current world state segment.
-
-    mov     ax, 0xF000
+    ; the BIOS ROM into the current world state segment.
+    mov     ax, BIOS_ROM_SEGMENT
     mov     ds, ax
     xor     si, si
 
@@ -94,6 +97,7 @@ InitWorld:
 
     mov     cx, (WORLD_WIDTH * WORLD_HEIGHT) / 2
 
+    ; Ensure that each byte is only set to 0 or 1.
 .Loop:
     lodsw
     and     ax, 0x0101
@@ -104,12 +108,31 @@ InitWorld:
     ret
 
 
+InitTimer:
+    ; Configure the programmable interrupt timer:
+    ;   Bit 0    (Use BCD) - No
+    ;   Bit 1..3 (Mode)    - Rate generator
+    ;   Bit 4..5 (Access)  - Low byte then high byte
+    ;   Bit 6..7 (Channel) - Channel 0 (IRQ0)
+    mov     al, 0b00110100
+    out     0x43, al
+
+    ; Set frequency divisor for channel 0.
+    mov     al, 0xff & CLOCK_DIVISOR
+    out     0x40, al
+    mov     al, 0xff & (CLOCK_DIVISOR >> 8)
+    out     0x40, al
+
+    ret
+
+
 Main:
     ; Set up stack.
     LOAD_STANDARD_SS
     mov     sp, INITIAL_SP
 
     call    InitVGA
+    call    InitTimer
     call    InitWorld
 
     ; CX = Segment containing world state for current time-step.
@@ -128,9 +151,13 @@ Main:
     mov     cx, es
     mov     dx, ds
 
-    ; Delay by waiting for the timer interrupt.
+    ; Wait for 18 interrupt timer ticks.
     sti
+    mov     al, 18
+.TimerDivider:
     hlt
+    dec     al
+    jnz     .TimerDivider
     cli
 
     jmp     .MainLoop
@@ -292,6 +319,6 @@ TickAndRender:
     ret
 
 
-    ; Pad to 512 bytes, with the final 2 bytes being the boot signature.
-    times (512 - ($ - $$) - 2) db 0
+    ; Pad up to 510 bytes, then write the 2-byte floppy boot signature.
+    times (510 - ($ - $$)) db 0
     dw 0xaa55
