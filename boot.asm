@@ -7,7 +7,6 @@
     ;   1'0000..1'FFFF - World State A.
     ;   2'0000..2'FFFF - World State B.
     ;   A'0000..A'FFFF - VGA VRAM.
-    ;   F'0000..F'FFFF - BIOS ROM.
 
     ; Configurable:
 
@@ -25,7 +24,6 @@
 %define VIDEO_WIDTH             640
 %define VIDEO_HEIGHT            480
 %define VRAM_SEGMENT            0xA000
-%define BIOS_ROM_SEGMENT        0xF000
 
     ; The hardware interrupt timer has a frequency of 1193180 Hz. The maximum
     ; frequency divisor value we can set is 65535, which produces a timer
@@ -85,23 +83,47 @@ InitVGA:
 
 
 InitWorld:
-    ; To provide some interesting initial state values, copy the raw content of
-    ; the BIOS ROM into the current world state segment.
-    mov     ax, BIOS_ROM_SEGMENT
-    mov     ds, ax
-    xor     si, si
-
+    ; Generate random numbers using a 16-bit Xorshift PRNG.
+    ; Adapted from: http://www.retroprogramming.com/2017/07/xorshift-pseudorandom-numbers-in-z80.html
+    ; Read and combine the current clock second and minute values from the CMOS
+    ; to use as the initial seed value.
     mov     ax, STATE_A_SEGMENT
     mov     es, ax
     xor     di, di
 
-    mov     cx, (WORLD_WIDTH * WORLD_HEIGHT) / 2
+    ; Use clock seconds as upper 8 bits.
+    xor     al, al
+    out     0x70, al
+    in      al, 0x71
+    movzx   dx, al
 
-    ; Ensure that each byte is only set to 0 or 1.
+    ; Use clock minutes as lower 8 bits.
+    mov     al, 2
+    out     0x70, al
+    in      al, 0x71
+    shl     ax, 8
+    or      dx, ax
+
+    mov     cx, WORLD_WIDTH * WORLD_HEIGHT
+
 .Loop:
-    lodsw
-    and     ax, 0x0101
-    stosw
+    ; Xorshift algorithm.
+    mov     ax, dx
+    shl     ax, 7
+    xor     dx, ax
+
+    mov     ax, dx
+    shr     ax, 9
+    xor     dx, ax
+
+    mov     ax, dx
+    shl     ax, 8
+    xor     dx, ax
+
+    ; Use bottommost bit as cell value.
+    mov     al, dl
+    and     al, 1
+    stosb
 
     loop    .Loop
 

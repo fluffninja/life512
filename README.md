@@ -8,7 +8,7 @@ Each cell's state is stored as one byte. Although somewhat inefficient memory-wi
 
 BIOS video mode 11h (640x480 monochrome) is used for graphics, allowing the whole 256x256 world to be seen at once. The palette is customised via the VGA DAC. The interrupt timer is used to control the speed of execution.
 
-The initial state of the world is populated by copying in the content of the BIOS ROM.
+The initial state of the world is populated using a xorshift pseudorandom number generator ([based on an implementation by John Metcalf](http://www.retroprogramming.com/2017/07/xorshift-pseudorandom-numbers-in-z80.html)). The seed value for PRNG is a combination of the current clock second and minute values read from the CMOS.
 
 ![Screenshot](screenshot.png)
 
