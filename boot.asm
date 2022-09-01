@@ -91,13 +91,13 @@ InitWorld:
     mov     es, ax
     xor     di, di
 
-    ; Use clock seconds as upper 8 bits.
+    ; Use clock seconds as lower 8 bits.
     xor     al, al
     out     0x70, al
     in      al, 0x71
     movzx   dx, al
 
-    ; Use clock minutes as lower 8 bits.
+    ; Use clock minutes as upper 8 bits.
     mov     al, 2
     out     0x70, al
     in      al, 0x71
