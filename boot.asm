@@ -93,7 +93,7 @@ InitWorld:
     ; to use as the initial seed value.
 
     ; Use clock seconds as lower 8 bits.
-    xor     al, al
+    mov     al, 0
     out     0x70, al
     in      al, 0x71
     movzx   dx, al
@@ -232,10 +232,6 @@ TickAndRender:
     xor     di, di
 
 .LoopCells:
-    ; AL = Live neighbour count.
-    ; AH = Current cell state.
-    xor     ax, ax
-
     ; BL = Cell X.
     ; BH = Cell Y.
     mov     bx, cx
@@ -244,6 +240,7 @@ TickAndRender:
     mov     ah, [bx]
 
     ; AL = Number of live neighbours.
+    mov     al, 0
     add     al, [bx - 1]
     add     al, [bx + 1]
 
@@ -261,11 +258,12 @@ TickAndRender:
     mov     al, DEAD_TO_ALIVE
 
     test    ah, ah
-    jz      .GetNextState
+    jz      .CurrentlyDead
 
     mov     al, ALIVE_TO_DEAD
+.CurrentlyDead:
 
-.GetNextState:
+    ; Get next state.
     shr     al, cl
     and     al, 1
 
