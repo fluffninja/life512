@@ -16,6 +16,8 @@
 %define DEAD_COLOUR             0x131418
 %define LIVE_COLOUR             0xFFEE58
 %define STEPS_PER_SECOND        20
+%define ALIVE_TO_DEAD           0b00001100
+%define DEAD_TO_ALIVE           0b00001000
 
     ; Non-configurable:
 
@@ -237,55 +239,40 @@ TickAndRender:
     ; BH = Cell Y.
     mov     bx, cx
 
-    ; Count live cells above.
+    ; AH = Current cell state.
+    mov     ah, [bx]
+
+    ; AL = Number of live neighbours.
+    add     al, [bx - 1]
+    add     al, [bx + 1]
+
     dec     bh
     add     al, [bx - 1]
     add     al, [bx]
     add     al, [bx + 1]
 
-    ; Count live cells on current row.
-    inc     bh
-    add     al, [bx - 1]
-    mov     ah, [bx]                ; Current cell.
-    add     al, [bx + 1]
-
-    ; Count live cells below.
-    inc     bh
+    add     bh, 2
     add     al, [bx - 1]
     add     al, [bx]
     add     al, [bx + 1]
 
-    ; AL = Next state.
+    mov     cl, al
+    mov     al, DEAD_TO_ALIVE
+
     test    ah, ah
-    jz      .CurrentlyDead
+    jz      .GetNextState
 
-.CurrentlyLive:
-    cmp     al, 2
-    je      .RemainLive
+    mov     al, ALIVE_TO_DEAD
 
-    cmp     al, 3
-    je      .RemainLive
+.GetNextState:
+    shr     al, cl
+    and     al, 1
 
-    jmp     .BecomeDead
-
-.CurrentlyDead:
-    cmp     al, 3
-    je      .BecomeLive
-
-    jmp     .RemainDead
-
-.RemainLive:
-.BecomeLive:
-    mov     al, 1
-    jmp     .WriteNextState
-
-.RemainDead:
-.BecomeDead:
-    mov     al, 0
-
-.WriteNextState:
     ; Write next state to ES:DI and increment DI.
     stosb
+
+    ; Restore cell X.
+    mov     cl, bl
 
     ; BL = State to draw (current cell state).
     mov     bl, ah
