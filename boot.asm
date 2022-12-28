@@ -16,8 +16,12 @@
 %define DEAD_COLOUR             0x131418
 %define LIVE_COLOUR             0xFFEE58
 %define STEPS_PER_SECOND        20
-%define ALIVE_TO_DEAD           0b00001100
-%define DEAD_TO_ALIVE           0b00001000
+
+    ; Set bits indicate the quantity of live neighbours that cause a live cell
+    ; to remain live (otherwise it becomes dead) or for a dead cell to become
+    ; live (otherwise is remains dead).
+%define LIVE_TO_DEAD            0b00001100
+%define DEAD_TO_LIVE            0b00001000
 
     ; Non-configurable:
 
@@ -255,12 +259,12 @@ TickAndRender:
     add     al, [bx + 1]
 
     mov     cl, al
-    mov     al, DEAD_TO_ALIVE
+    mov     al, DEAD_TO_LIVE
 
     test    ah, ah
     jz      .CurrentlyDead
 
-    mov     al, ALIVE_TO_DEAD
+    mov     al, LIVE_TO_DEAD
 .CurrentlyDead:
 
     ; Get next state.
