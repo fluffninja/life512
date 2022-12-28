@@ -58,11 +58,11 @@ InitVGA:
     ; bottom 2 bits of each channel will be thrown away.
 
     ; Reprogram colour 1 (palette index 0).
-    mov     dx, 0x03c8
+    mov     dx, 0x3c8
     mov     al, 0
     out     dx, al
 
-    mov     dx, 0x03c9
+    inc     dx          ; 0x3c9
     mov     al, 0x3f & (DEAD_COLOUR >> 18)
     out     dx, al
     mov     al, 0x3f & (DEAD_COLOUR >> 10)
@@ -71,11 +71,11 @@ InitVGA:
     out     dx, al
 
     ; Reprogram colour 2 (palette index 63).
-    mov     dx, 0x03c8
+    dec     dx          ; 0x3c8
     mov     al, 63
     out     dx, al
 
-    mov     dx, 0x03c9
+    inc     dx          ; 0x3c9
     mov     al, 0x3f & (LIVE_COLOUR >> 18)
     out     dx, al
     mov     al, 0x3f & (LIVE_COLOUR >> 10)
@@ -109,7 +109,8 @@ InitWorld:
     mov     es, ax
     xor     di, di
 
-    mov     cx, WORLD_WIDTH * WORLD_HEIGHT
+    ; Start at 256 * 256.
+    xor     cx, cx
 
 .Loop:
     ; Xorshift algorithm.
