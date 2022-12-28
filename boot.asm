@@ -50,10 +50,12 @@ InitVGA:
     int     0x10
 
     ; Reprogram the colour palette in the VGA DAC. Each RGB channel is 6-bit.
-    ; For simplicity, our constants are defined as 8-bit RGB, so disgard the
-    ; bottom 2 bits of each channel.
+    ; Write the palette index byte to 0x3c8, then write the R, G, then B bytes
+    ; of that colour to 0x3c9.
+    ; For simplicity, our colour constants are defined with 8-bit channels; the
+    ; bottom 2 bits of each channel will be thrown away.
 
-    ; Reprogram colour 1.
+    ; Reprogram colour 1 (palette index 0).
     mov     dx, 0x03c8
     mov     al, 0
     out     dx, al
@@ -66,7 +68,7 @@ InitVGA:
     mov     al, 0x3f & (DEAD_COLOUR >> 2)
     out     dx, al
 
-    ; Reprogram colour 2.
+    ; Reprogram colour 2 (palette index 63).
     mov     dx, 0x03c8
     mov     al, 63
     out     dx, al
@@ -87,9 +89,6 @@ InitWorld:
     ; Adapted from: http://www.retroprogramming.com/2017/07/xorshift-pseudorandom-numbers-in-z80.html
     ; Read and combine the current clock second and minute values from the CMOS
     ; to use as the initial seed value.
-    mov     ax, STATE_A_SEGMENT
-    mov     es, ax
-    xor     di, di
 
     ; Use clock seconds as lower 8 bits.
     xor     al, al
@@ -103,6 +102,10 @@ InitWorld:
     in      al, 0x71
     shl     ax, 8
     or      dx, ax
+
+    mov     ax, STATE_A_SEGMENT
+    mov     es, ax
+    xor     di, di
 
     mov     cx, WORLD_WIDTH * WORLD_HEIGHT
 
@@ -132,17 +135,17 @@ InitWorld:
 
 InitTimer:
     ; Configure the programmable interrupt timer:
-    ;   Bit 0    (Use BCD) - No
-    ;   Bit 1..3 (Mode)    - Rate generator
-    ;   Bit 4..5 (Access)  - Low byte then high byte
-    ;   Bit 6..7 (Channel) - Channel 0 (IRQ0)
-    mov     al, 0b00110100
+    ;   Bit 0    (BCD or binary) -   0 - Binary.
+    ;   Bit 1..3 (Mode)          - 010 - Rate generator.
+    ;   Bit 4..5 (Access)        -  11 - Low byte then high byte.
+    ;   Bit 6..7 (Channel)       -  00 - Channel 0 (IRQ0).
+    mov     al, 0b00_11_010_0
     out     0x43, al
 
     ; Set frequency divisor for channel 0.
-    mov     al, 0xff & (CLOCK_DIVISOR)
+    mov     ax, CLOCK_DIVISOR
     out     0x40, al
-    mov     al, 0xff & ((CLOCK_DIVISOR) >> 8)
+    mov     al, ah
     out     0x40, al
 
     ret
@@ -173,14 +176,16 @@ Main:
     mov     cx, es
     mov     dx, ds
 
-    ; Wait for 18 interrupt timer ticks.
-    sti
+    ; Wait for 18 interrupt timer ticks (see note by `CLOCK_DIVISOR`).
     mov     al, 18
+
 .TimerDivider:
+    sti
     hlt
+    cli
+
     dec     al
     jnz     .TimerDivider
-    cli
 
     jmp     .MainLoop
 
@@ -224,7 +229,6 @@ TickAndRender:
     xor     di, di
 
 .LoopCells:
-
     ; AL = Live neighbour count.
     ; AH = Current cell state.
     xor     ax, ax
@@ -280,10 +284,8 @@ TickAndRender:
     mov     al, 0
 
 .WriteNextState:
-
     ; Write next state to ES:DI and increment DI.
     stosb
-
 
     ; BL = State to draw (current cell state).
     mov     bl, ah
