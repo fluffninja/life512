@@ -1,10 +1,11 @@
     bits 16
+    cpu 8086
     org 0x7c00
 
     ; Key Memory Addresses:
     ;   0'0000..0'7BFF - Stack.
     ;   0'7C00..0'7DFF - This Code.
-    ;   1'0000..1'FFFF - World State A.
+    ;   1'0000..1'FFFF - World State A (Initial).
     ;   2'0000..2'FFFF - World State B.
     ;   A'0000..A'FFFF - VGA VRAM.
 
@@ -51,7 +52,8 @@ Start:
 
 
 InitVGA:
-    ; Use graphics mode 0x11: 640x480 monochrome (2-colour).
+    ; Set graphics mode (AL := 0).
+    ; Use mode 0x11 (AH := 0x11) - 640x480 monochrome (2 palette colours).
     mov     ax, 0x11
     int     0x10
 
@@ -66,7 +68,7 @@ InitVGA:
     mov     al, 0
     out     dx, al
 
-    inc     dx          ; 0x3c9
+    inc     dx          ; DX := 0x3c9
     mov     al, 0x3f & (DEAD_COLOUR >> 18)
     out     dx, al
     mov     al, 0x3f & (DEAD_COLOUR >> 10)
@@ -75,11 +77,11 @@ InitVGA:
     out     dx, al
 
     ; Reprogram colour 2 (palette index 63).
-    dec     dx          ; 0x3c8
+    dec     dx          ; DX := 0x3c8
     mov     al, 63
     out     dx, al
 
-    inc     dx          ; 0x3c9
+    inc     dx          ; DX := 0x3c9
     mov     al, 0x3f & (LIVE_COLOUR >> 18)
     out     dx, al
     mov     al, 0x3f & (LIVE_COLOUR >> 10)
@@ -100,14 +102,13 @@ InitWorld:
     mov     al, 0
     out     0x70, al
     in      al, 0x71
-    movzx   dx, al
+    mov     dl, al
 
     ; Use clock minutes as upper 8 bits.
     mov     al, 2
     out     0x70, al
     in      al, 0x71
-    shl     ax, 8
-    or      dx, ax
+    mov     dh, al
 
     mov     ax, STATE_A_SEGMENT
     mov     es, ax
@@ -117,23 +118,32 @@ InitWorld:
     xor     cx, cx
 
 .Loop:
+    ; Borrow CL for shift.
+    mov     bl, cl
+
     ; Xorshift algorithm.
     mov     ax, dx
-    shl     ax, 7
+    mov     cl, 7
+    shl     ax, cl
     xor     dx, ax
 
     mov     ax, dx
-    shr     ax, 9
+    add     cl, 2       ; CL := 9
+    shr     ax, cl
     xor     dx, ax
 
     mov     ax, dx
-    shl     ax, 8
+    dec     cl          ; CL := 8
+    shl     ax, cl
     xor     dx, ax
 
     ; Use bottommost bit as cell value.
     mov     al, dl
     and     al, 1
     stosb
+
+    ; Restore CL.
+    mov     cl, bl
 
     loop    .Loop
 
@@ -236,14 +246,18 @@ TickAndRender:
     xor     di, di
 
 .LoopCells:
-    ; BL = Cell X.
-    ; BH = Cell Y.
+    ; CL is needed for shifts, so use BX for cell co-ordinate inside loop body.
+    ; BL = Cell X, BH = Cell Y.
     mov     bx, cx
+
+    ;
+    ; Read current cell state and count number of live neighbours.
+    ;
 
     ; AH = Current cell state.
     mov     ah, [bx]
 
-    ; AL = Number of live neighbours.
+    ; AL = Live neighbour counts.
     mov     al, 0
     add     al, [bx - 1]
     add     al, [bx + 1]
@@ -258,7 +272,16 @@ TickAndRender:
     add     al, [bx]
     add     al, [bx + 1]
 
+    ; Restore BX.
+    mov     bx, cx
+
+    ;
+    ; Use state-transition ruleset to pick next state.
+    ;
+
     mov     cl, al
+
+    ; AL = State-transition ruleset for current state.
     mov     al, DEAD_TO_LIVE
 
     test    ah, ah
@@ -267,60 +290,66 @@ TickAndRender:
     mov     al, LIVE_TO_LIVE
 .CurrentlyDead:
 
-    ; Get next state.
+    ; AL = Next state.
     shr     al, cl
     and     al, 1
 
     ; Write next state to ES:DI and increment DI.
     stosb
 
-    ; Restore cell X.
-    mov     cl, bl
+    ;
+    ; Draw the current cell state. Calculate pixel's byte offset into VGA RAM
+    ; and set the cell's bit as appropriate.
+    ;
 
-    ; BL = State to draw (current cell state).
-    mov     bl, ah
+    ; CH = State to draw (current cell state).
+    mov     ch, ah
 
-    ; BP = Pixel byte offset.
-    movzx   ax, ch
+    ; BP = (Y + OffsetTop) * (VideoWidth / 8)
+    mov     al, bh
+    mov     ah, 0
     add     ax, (VIDEO_HEIGHT - WORLD_HEIGHT) / 2
     mov     dx, VIDEO_WIDTH / 8
     mul     dx
 
-    movzx   dx, cl
-    add     dx, (VIDEO_WIDTH - WORLD_WIDTH) / 2
-    shr     dx, 3
-    add     ax, dx
-
     mov     bp, ax
 
-    ; Save CX.
-    mov     dx, cx
+    ; BP += (X + OffsetLeft) / 8
+    mov     al, bl
+    mov     ah, 0
+    add     ax, (VIDEO_WIDTH - WORLD_WIDTH) / 2
+    mov     cl, 3
+    shr     ax, cl
 
-    ; AL = Bitmask.
+    add     bp, ax
+
+    ; AL = Mask for cell bit inside pixel byte.
     mov     al, 0x80
+    mov     cl, bl
     and     cl, 7
     shr     al, cl
 
-    ; AH = Current pixel value.
+    ; AH = Current pixel byte value.
     mov     ah, [ss:bp]
 
-    ; Set or unset bit in AH.
-    test    bl, bl
+    ; Set or unset the cell bit.
+    test    ch, ch
     jnz     .SetLive
 
     not     al
     and     ah, al
+
     jmp     .WritePixel
 
 .SetLive:
     or      ah, al
 
 .WritePixel:
-    ; Write back AH.
+    ; Write back pixel byte.
     mov     [ss:bp], ah
 
     ; Restore CX.
-    mov     cx, dx
+    mov     cx, bx
 
     ; Next cell.
     inc     cx
