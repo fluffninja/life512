@@ -1,16 +1,33 @@
 # Conway's Game of Life in a Bootloader
 
-This is an implementation of [Conway's Game of Life](https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life) that fits within a 512-byte floppy bootloader. It's written in 16-bit x86 assembly, limited to instructions and addressing modes available on the original [Intel 8086](https://en.wikipedia.org/wiki/X86_instruction_listings) \*.
+This is an implementation of [Conway's Game of Life](https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life) that fits within a 512-byte floppy bootloader for the IBM PC.
+
+As an additional challenge, the implementation is limited to only the instructions and addressing modes available on the orinal [Intel 8086](https://en.wikipedia.org/wiki/X86_instruction_listings).
 
 ![Screenshot](screenshot.png)
 
 ## Implementation
 
+### Limitations of the Original Intel 8086
+
+Being limited to the instructions and addressing modes of the original 8086 presents some interesting challenges:
+
+* Can only perform indirect memory access using `bx`, `bp`, `si`, and `di`.
+* Cannot use `shl` or `shr` with an immediate operand greater than `1` (must use `cl` instead).
+* Register operands for numerous instructions, like `mul`, cannot be changed.
+* No `movzx`.
+* No `fs` or `gs` segments.
+* 16-bit registers only.
+
+The main consequence of this is the need for a lot of register juggling.
+
 ### Memory Usage
 
-The world is made up of 256x256 cells that are alive or dead (65,536 in total). To eliminate the additional instructions that would be required to perform bitwise operations, each cell's state is stored using one byte. Thus it takes 65,536 bytes to store the state of the world, which is an _entire_ 16-bit x86 segment. During each simulation step, `DS` points to the current world state and `ES` points to the next world state. `SS` is repurposed as a third data-segment for writing to VRAM. The main simulation loop therefore does not make use of the stack, instead performing a lot of register juggling in order to run the simulation and draw to the screen in a single pass.
+The world is made up of 256x256 cells (65,536 in total) that are each either alive or dead. To cut down on complexity and instructions (e.g. for bitwise operations), each cell is stored using one byte. Thus it takes 65,536 bytes to store the state of the world at one simulation step, which happens to be the size of a 16-bit x86 segment.
 
-Another advantage to storing each cell's state as a byte, although inefficient memory-wise, is that it allows `CX` to hold the cell's byte offset into the segment while `CL` and `CH` _automatically_ hold the cell's X and Y co-ordinates respectively. `CL` and `CH` can then be incremented and decremented separately, with the resulting lack of carry between the two halves creating the correct wraparound behaviour at the world's edges along the X-axis.
+During each simulation step, `ds` points to the current world state and `es` points to the next world state. The stack segment, `ss`, is repurposed as a third data-segment for accessing VGA RAM. As a result, the main loop cannot make use of the stack, though it nevertheless runs and renders the simulation in a single pass.
+
+Although an inefficient use of memory, the storage of each cell's state as a single byte means that a 16-bit general-purpose register can hold the byte offset of a cell while its partial 8-bit registers automatically take the values of that cell's X and Y co-ordinates. The partial registers can be operated on separately without a carry from the lower into the upper, thus creating the correct wraparound behaviour at the world's edges.
 
 ### Random Number Generator
 
@@ -27,17 +44,6 @@ The colour-palette is customised via the VGA DAC.
 ### Timing
 
 The interval timer (IRQ0) is used to control the speed of execution.
-
-### Limitations of the Original Intel 8086
-
-As an additional challenge, the implementation is limited to using just the instructions and addressing modes available to the original [Intel 8086](https://en.wikipedia.org/wiki/X86_instruction_listings) (using NASM's `cpu 8086` directive).
-
-This imposes some interesting limitations:
-
-* Cannot use `shl` or `shr` with an immediate operand greater than `1` (must use `cl` instead).
-* Can only perform indirect memory access using `bx`, `bp`, `si`, and `di`.
-* No `movzx`.
-* No `fs` or `gs` segments.
 
 ## Building
 
