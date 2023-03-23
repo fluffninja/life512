@@ -133,7 +133,7 @@ InitWorld:
     xor     dx, ax
 
     mov     ax, dx
-    dec     cl          ; CL := 8
+    dec     cx          ; CL := 8
     shl     ax, cl
     xor     dx, ax
 
@@ -203,7 +203,7 @@ Main:
     hlt
     cli
 
-    dec     al
+    dec     ax
     jnz     .TimerDivider
 
     jmp     .MainLoop
@@ -359,8 +359,8 @@ TickAndRender:
     mov     cx, bx
 
     ; Next cell.
-    add     cx, 1
-    jnc     .LoopCells
+    inc     cx
+    jnz     .LoopCells
 
     ; Restore stack segment.
     LOAD_STANDARD_SS
