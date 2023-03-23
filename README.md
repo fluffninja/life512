@@ -2,7 +2,7 @@
 
 This is an implementation of [Conway's Game of Life](https://en.wikipedia.org/wiki/Conway%27s_Game_of_Life) that fits within a 512-byte floppy bootloader for the IBM PC.
 
-As an additional challenge, the implementation is limited to only the instructions and addressing modes available on the orinal [Intel 8086](https://en.wikipedia.org/wiki/X86_instruction_listings).
+As an additional challenge, the implementation is limited to only the instructions and addressing modes available on the original [Intel 8086](https://en.wikipedia.org/wiki/X86_instruction_listings).
 
 ![Screenshot](screenshot.png)
 
@@ -12,8 +12,8 @@ As an additional challenge, the implementation is limited to only the instructio
 
 Being limited to the instructions and addressing modes of the original 8086 presents some interesting challenges:
 
-* Can only perform indirect memory access using `bx`, `bp`, `si`, and `di`.
-* Cannot use `shl` or `shr` with an immediate operand greater than `1` (must use `cl` instead).
+* Indirect memory accesses can only be performed using `bx`, `bp`, `si`, and `di`.
+* `shl` and `shr` cannot be used with an immediate operand greater than `1` (must use `cl` instead).
 * Register operands for numerous instructions, like `mul`, cannot be changed.
 * No `movzx`.
 * No `fs` or `gs` segments.
