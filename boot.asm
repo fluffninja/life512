@@ -229,7 +229,7 @@ TickAndRender:
     ;
     ;   * SI is used because it's our only spare register besides BP (SP needs
     ;     to remain unchanged so that the stack remains in the correct location
-    ;     after restoring SS), but indirect accesses with BP uses a larger
+    ;     after restoring SS), but indirect accesses with BP require a larger
     ;     encoding due to the mandatory displacement field (even if zero).
     ;
     ; Notes:
@@ -264,7 +264,7 @@ TickAndRender:
     ; AH = Current cell state.
     mov     ah, [bx]
 
-    ; AL = Live neighbour counts.
+    ; AL = Live neighbour count.
     mov     al, 0
     add     al, [bx - 1]
     add     al, [bx + 1]
