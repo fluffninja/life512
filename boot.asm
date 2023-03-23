@@ -169,6 +169,8 @@ InitTimer:
 
 
 Main:
+    cld
+
     ; Set up stack.
     LOAD_STANDARD_SS
     mov     sp, INITIAL_SP
