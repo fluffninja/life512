@@ -216,7 +216,7 @@ TickAndRender:
     ;
     ; Register Usage:
     ;   SS - VGA RAM.
-    ;   BP - Memory access for SS.
+    ;   SI - Memory access for SS *.
     ;   BX - Memory access for DS.
     ;       BL - Cell X co-ordinate.
     ;       BH - Cell Y co-ordinate.
@@ -226,6 +226,11 @@ TickAndRender:
     ;   DI - Memory access for ES.
     ;   AX - Arithmetic/scratch.
     ;   DX - Arithmetic/scratch.
+    ;
+    ;   * SI is used because it's our only spare register besides BP (SP needs
+    ;     to remain unchanged so that the stack remains in the correct location
+    ;     after restoring SS), but indirect accesses with BP uses a larger
+    ;     encoding due to the mandatory displacement field (even if zero).
     ;
     ; Notes:
     ;   This function does not make use of the stack, so the stack segment is
@@ -307,23 +312,23 @@ TickAndRender:
     ; CH = State to draw (current cell state).
     mov     ch, ah
 
-    ; BP = (Y + OffsetTop) * (VideoWidth / 8)
+    ; SI = (Y + OffsetTop) * (VideoWidth / 8)
     mov     al, bh
     mov     ah, 0
     add     ax, (VIDEO_HEIGHT - WORLD_HEIGHT) / 2
     mov     dx, VIDEO_WIDTH / 8
     mul     dx
 
-    mov     bp, ax
+    mov     si, ax
 
-    ; BP += (X + OffsetLeft) / 8
+    ; SI += (X + OffsetLeft) / 8
     mov     al, bl
     mov     ah, 0
     add     ax, (VIDEO_WIDTH - WORLD_WIDTH) / 2
     mov     cl, 3
     shr     ax, cl
 
-    add     bp, ax
+    add     si, ax
 
     ; AL = Mask for cell bit inside pixel byte.
     mov     al, 0x80
@@ -332,7 +337,7 @@ TickAndRender:
     shr     al, cl
 
     ; AH = Current pixel byte value.
-    mov     ah, [ss:bp]
+    mov     ah, [ss:si]
 
     ; Set or unset the cell bit.
     test    ch, ch
@@ -348,7 +353,7 @@ TickAndRender:
 
 .WritePixel:
     ; Write back pixel byte.
-    mov     [ss:bp], ah
+    mov     [ss:si], ah
 
     ; Restore CX.
     mov     cx, bx
