@@ -128,7 +128,7 @@ InitWorld:
     xor     dx, ax
 
     mov     ax, dx
-    add     cl, 2       ; CL := 9
+    mov     cl, 9
     shr     ax, cl
     xor     dx, ax
 
