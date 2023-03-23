@@ -114,7 +114,7 @@ InitWorld:
     mov     es, ax
     xor     di, di
 
-    ; Start at 256 * 256.
+    ; Start at zero to loop 256*256 times.
     xor     cx, cx
 
 .Loop:
