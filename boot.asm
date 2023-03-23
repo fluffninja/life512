@@ -360,7 +360,7 @@ TickAndRender:
 
     ; Next cell.
     add     cx, 1
-    jnz     .LoopCells
+    jnc     .LoopCells
 
     ; Restore stack segment.
     LOAD_STANDARD_SS
