@@ -352,8 +352,7 @@ TickAndRender:
     mov     cx, bx
 
     ; Next cell.
-    inc     cx
-    test    cx, cx
+    add     cx, 1
     jnz     .LoopCells
 
     ; Restore stack segment.
