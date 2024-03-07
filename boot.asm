@@ -32,7 +32,7 @@
 %define VIDEO_HEIGHT            480
 %define VRAM_SEGMENT            0xA000
 
-    ; The hardware interrupt timer has a frequency of 1193180 Hz. The maximum
+    ; The hardware interval timer has a frequency of 1193180 Hz. The maximum
     ; frequency divisor value we can set is 65535, which produces a timer
     ; frequency of approximately 18 Hz. By waiting for 18 timer interrupts in
     ; between each frame, we can act as if the timer actually has a frequency
@@ -144,7 +144,7 @@
 
 
 %macro INITIALIZE_TIMER 0
-    ; Configure the programmable interrupt timer:
+    ; Configure the programmable interval timer:
     ;   Bit 0    (BCD or binary) -   0 - Binary.
     ;   Bit 1..3 (Mode)          - 010 - Rate generator.
     ;   Bit 4..5 (Access)        -  11 - Low byte then high byte.
@@ -347,7 +347,7 @@ Start:
     mov     cx, es
     mov     dx, ds
 
-    ; Wait for 18 interrupt timer ticks (see note by `CLOCK_DIVISOR`).
+    ; Wait for 18 interval timer ticks (see note by `CLOCK_DIVISOR`).
     mov     al, 18
 
 .TimerDivider:
