@@ -46,12 +46,7 @@
 %endmacro
 
 
-Start:
-    cli
-    jmp     0:Main
-
-
-InitVGA:
+%macro INITIALIZE_VIDEO 0
     ; Set graphics mode (AL := 0).
     ; Use mode 0x11 (AH := 0x11) - 640x480 monochrome (2 palette colours).
     mov     ax, 0x11
@@ -88,11 +83,10 @@ InitVGA:
     out     dx, al
     mov     al, 0x3f & (LIVE_COLOUR >> 2)
     out     dx, al
+%endmacro
 
-    ret
 
-
-InitWorld:
+%macro INITIALIZE_WORLD 0
     ; Generate random numbers using a 16-bit Xorshift PRNG.
     ; Adapted from: http://www.retroprogramming.com/2017/07/xorshift-pseudorandom-numbers-in-z80.html
     ; Read and combine the current clock second and minute values from the CMOS
@@ -117,7 +111,7 @@ InitWorld:
     ; Start at zero to loop 256*256 times.
     xor     cx, cx
 
-.Loop:
+%%Loop:
     ; Borrow CL for shift.
     mov     bl, cl
 
@@ -145,12 +139,11 @@ InitWorld:
     ; Restore CL.
     mov     cl, bl
 
-    loop    .Loop
+    loop    %%Loop
+%endmacro
 
-    ret
 
-
-InitTimer:
+%macro INITIALIZE_TIMER 0
     ; Configure the programmable interrupt timer:
     ;   Bit 0    (BCD or binary) -   0 - Binary.
     ;   Bit 1..3 (Mode)          - 010 - Rate generator.
@@ -164,52 +157,10 @@ InitTimer:
     out     0x40, al
     mov     al, ah
     out     0x40, al
-
-    ret
-
-
-Main:
-    cld
-
-    ; Set up stack.
-    LOAD_STANDARD_SS
-    mov     sp, INITIAL_SP
-
-    call    InitVGA
-    call    InitTimer
-    call    InitWorld
-
-    ; CX = Segment containing world state for current time-step.
-    ; DX = Segment containing world state the next time-step.
-
-    mov     cx, STATE_A_SEGMENT
-    mov     dx, STATE_B_SEGMENT
-
-.MainLoop:
-    mov     ds, cx
-    mov     es, dx
-
-    call    TickAndRender
-
-    ; Swap segments.
-    mov     cx, es
-    mov     dx, ds
-
-    ; Wait for 18 interrupt timer ticks (see note by `CLOCK_DIVISOR`).
-    mov     al, 18
-
-.TimerDivider:
-    sti
-    hlt
-    cli
-
-    dec     ax
-    jnz     .TimerDivider
-
-    jmp     .MainLoop
+%endmacro
 
 
-TickAndRender:
+%macro TICK_AND_RENDER 0
     ; Parameters:
     ;   DS - World state for current time-step (read from).
     ;   ES - World state for next time-step (written to).
@@ -233,7 +184,7 @@ TickAndRender:
     ;     encoding due to the mandatory displacement field (even if zero).
     ;
     ; Notes:
-    ;   This function does not make use of the stack, so the stack segment is
+    ;   This routine does not make use of the stack, since the stack segment is
     ;   repurposed as a third data segment to provide VRAM access.
     ;
     ;   The world is 256 by 256, with each cell represented as a single byte.
@@ -252,7 +203,7 @@ TickAndRender:
     xor     cx, cx
     xor     di, di
 
-.LoopCells:
+%%LoopCells:
     ; CL is needed for shifts, so use BX for cell co-ordinate inside loop body.
     ; BL = Cell X, BH = Cell Y.
     mov     bx, cx
@@ -292,10 +243,10 @@ TickAndRender:
     mov     al, DEAD_TO_LIVE
 
     test    ah, ah
-    jz      .CurrentlyDead
+    jz      %%CellCurrentlyDead
 
     mov     al, LIVE_TO_LIVE
-.CurrentlyDead:
+%%CellCurrentlyDead:
 
     ; AL = Next state.
     shr     al, cl
@@ -341,17 +292,17 @@ TickAndRender:
 
     ; Set or unset the cell bit.
     test    ch, ch
-    jnz     .SetLive
+    jnz     %%SetCellLive
 
     not     al
     and     ah, al
 
-    jmp     .WritePixel
+    jmp     %%WritePixel
 
-.SetLive:
+%%SetCellLive:
     or      ah, al
 
-.WritePixel:
+%%WritePixel:
     ; Write back pixel byte.
     mov     [ss:si], ah
 
@@ -360,12 +311,54 @@ TickAndRender:
 
     ; Next cell.
     inc     cx
-    jnz     .LoopCells
+    jnz     %%LoopCells
 
     ; Restore stack segment.
     LOAD_STANDARD_SS
+%endmacro
 
-    ret
+
+    ; Program entrypoint.
+Start:
+    cli
+    cld
+
+    ; Set up stack.
+    LOAD_STANDARD_SS
+    mov     sp, INITIAL_SP
+
+    INITIALIZE_VIDEO
+    INITIALIZE_TIMER
+    INITIALIZE_WORLD
+
+    ; CX = Segment containing world state for current time-step.
+    ; DX = Segment containing world state the next time-step.
+
+    mov     cx, STATE_A_SEGMENT
+    mov     dx, STATE_B_SEGMENT
+
+.MainLoop:
+    mov     ds, cx
+    mov     es, dx
+
+    TICK_AND_RENDER
+
+    ; Swap segments.
+    mov     cx, es
+    mov     dx, ds
+
+    ; Wait for 18 interrupt timer ticks (see note by `CLOCK_DIVISOR`).
+    mov     al, 18
+
+.TimerDivider:
+    sti
+    hlt
+    cli
+
+    dec     ax
+    jnz     .TimerDivider
+
+    jmp     .MainLoop
 
 
     ; Pad up to 510 bytes, then write the 2-byte floppy boot signature.
