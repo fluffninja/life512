@@ -16,7 +16,10 @@ run: boot.img
 dump: boot.dump
 	cat $<
 
+hex: boot.bin
+	hexdump -Cv $<
+
 clean:
 	rm -fv boot.bin boot.img boot.dump
 
-.PHONY: all run dump clean
+.PHONY: all run dump hex clean
