@@ -14,8 +14,8 @@
 %define INITIAL_SP              0x7c00
 %define STATE_A_SEGMENT         0x1000
 %define STATE_B_SEGMENT         0x2000
-%define DEAD_COLOUR             0x131418
-%define LIVE_COLOUR             0xFFEE58
+%define DEAD_COLOUR             0x281f1f
+%define LIVE_COLOUR             0x17d7d7
 %define STEPS_PER_SECOND        20
 
     ; Set bits indicate the quantity of live neighbours that cause a live cell
