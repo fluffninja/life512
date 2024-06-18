@@ -1,43 +1,57 @@
+    ; life512
+    ; =======
+    ; Conway's Game of Life in 512 Bytes (of 8086 Assembly).
+    ;
+
     bits 16
     cpu 8086
     org 0x7c00
 
-    ; Key Memory Addresses:
-    ;   0'0000..0'7BFF - Stack.
-    ;   0'7C00..0'7DFF - This Code.
-    ;   1'0000..1'FFFF - World State A (Initial).
+    ; Key Memory Addresses
+    ; ====================
+    ;   0'0000..0'7BFF - Program Stack (directly beneath this code).
+    ;   0'7C00..0'7DFF - This Code (unchangeable; loaded by the BIOS).
+    ;   1'0000..1'FFFF - World State A.
     ;   2'0000..2'FFFF - World State B.
-    ;   A'0000..A'FFFF - VGA VRAM.
+    ;   A'0000..A'FFFF - VGA RAM (unchangeable).
+    ;
 
-    ; Configurable:
+    ; Configurable Constants
+    ; ======================
 
 %define INITIAL_SP              0x7c00
-%define STATE_A_SEGMENT         0x1000
-%define STATE_B_SEGMENT         0x2000
-%define DEAD_COLOUR             0x281f1f
-%define LIVE_COLOUR             0x17d7d7
+%define SEGMENT_WORLD_STATE_A   0x1000
+%define SEGMENT_WORLD_STATE_B   0x2000
+%define COLOR_DEAD_CELL         0x281f1f
+%define COLOR_LIVE_CELL         0x17d7d7
 %define STEPS_PER_SECOND        20
 
-    ; Set bits indicate the quantity of live neighbours that cause a live cell
-    ; to remain live (otherwise it becomes dead) or for a dead cell to become
-    ; live (otherwise is remains dead).
-%define LIVE_TO_LIVE            0b00001100
-%define DEAD_TO_LIVE            0b00001000
+    ; The set bits indicate the number of live neighboring cells that allow for
+    ; a live cell to remain live (otherwise it becomes dead), or that allow for
+    ; a dead cell to become live (otherwise it remains dead).
+    ;
+%define LIVE_CELL_TO_LIVE_CELL  0b00001100
+%define DEAD_CELL_TO_LIVE_CELL  0b00001000
 
-    ; Non-configurable:
+    ; Non-Configurable Constants
+    ; ==========================
 
 %define WORLD_WIDTH             256
 %define WORLD_HEIGHT            256
 %define VIDEO_WIDTH             640
 %define VIDEO_HEIGHT            480
-%define VRAM_SEGMENT            0xA000
+%define SEGMENT_VGA_RAM         0xA000
 
     ; The hardware interval timer has a frequency of 1193180 Hz. The maximum
-    ; frequency divisor value we can set is 65535, which produces a timer
-    ; frequency of approximately 18 Hz. By waiting for 18 timer interrupts in
-    ; between each frame, we can act as if the timer actually has a frequency
-    ; of around 65535 instead, which makes the calculation much simpler:
-%define CLOCK_DIVISOR           0xffff / STEPS_PER_SECOND
+    ; frequency divisor value we can set is 65535 (which produces a timer
+    ; frequency of 18 Hz). By waiting for 18 timer interrupts between each
+    ; frame, we can act as if the timer actually has a frequency of 65535,
+    ; which makes calculating all of this much simpler.
+    ;
+%define CLOCK_FREQUENCY_HZ      1193180
+%define MAX_FREQUENCY_DIVISOR   65535
+
+%define MAKEWORD(HI, LO) (((HI) & 0xff) << 8 | ((LO) & 0xff))
 
 
 %macro LOAD_STANDARD_SS 0
@@ -47,41 +61,42 @@
 
 
 %macro INITIALIZE_VIDEO 0
-    ; Set graphics mode (AL := 0).
-    ; Use mode 0x11 (AH := 0x11) - 640x480 monochrome (2 palette colours).
-    mov     ax, 0x11
+    ; Set the VGA graphics mode (AH := 0) to monochrome 640x480 (AL := 0x11).
+    mov     ax, MAKEWORD(0, 0x11)
     int     0x10
 
-    ; Reprogram the colour palette in the VGA DAC. Each RGB channel is 6-bit.
-    ; Write the palette index byte to 0x3c8, then write the R, G, then B bytes
-    ; of that colour to 0x3c9.
-    ; For simplicity, our colour constants are defined with 8-bit channels; the
-    ; bottom 2 bits of each channel will be thrown away.
+    ; Reprogram the color palette used by the VGA DAC.
+    ; The DAC specifies each channel as a 6-bit value. For ease, we allow our
+    ; cell color constants to be defined as familiar 8-bit RGB values, and then
+    ; throw away the bottom 2 bits of each channel.
+    ; The palette is programmed by first writing the palette index to 0x3c8,
+    ; then writing the R, G, and B channel values in turn to 0x3c9.
+    ; Monochrome VGA graphics use palette entries 0 and 63.
 
-    ; Reprogram colour 1 (palette index 0).
+    ; Set color 1.
     mov     dx, 0x3c8
     mov     al, 0
     out     dx, al
 
     inc     dx          ; DX := 0x3c9
-    mov     al, 0x3f & (DEAD_COLOUR >> 18)
+    mov     al, 0x3f & (COLOR_DEAD_CELL >> 18)
     out     dx, al
-    mov     al, 0x3f & (DEAD_COLOUR >> 10)
+    mov     al, 0x3f & (COLOR_DEAD_CELL >> 10)
     out     dx, al
-    mov     al, 0x3f & (DEAD_COLOUR >> 2)
+    mov     al, 0x3f & (COLOR_DEAD_CELL >> 2)
     out     dx, al
 
-    ; Reprogram colour 2 (palette index 63).
+    ; Set color 2.
     dec     dx          ; DX := 0x3c8
     mov     al, 63
     out     dx, al
 
     inc     dx          ; DX := 0x3c9
-    mov     al, 0x3f & (LIVE_COLOUR >> 18)
+    mov     al, 0x3f & (COLOR_LIVE_CELL >> 18)
     out     dx, al
-    mov     al, 0x3f & (LIVE_COLOUR >> 10)
+    mov     al, 0x3f & (COLOR_LIVE_CELL >> 10)
     out     dx, al
-    mov     al, 0x3f & (LIVE_COLOUR >> 2)
+    mov     al, 0x3f & (COLOR_LIVE_CELL >> 2)
     out     dx, al
 %endmacro
 
@@ -91,20 +106,22 @@
     ; Adapted from: http://www.retroprogramming.com/2017/07/xorshift-pseudorandom-numbers-in-z80.html
     ; Read and combine the current clock second and minute values from the CMOS
     ; to use as the initial seed value.
+    ; To ensure that NMIs remain disabled, bit 8 must remain set for all writes
+    ; to port 0x70 (CMOS address select).
 
     ; Use clock seconds as lower 8 bits.
-    mov     al, 0
+    mov     al, 0x80
     out     0x70, al
     in      al, 0x71
     mov     dl, al
 
     ; Use clock minutes as upper 8 bits.
-    mov     al, 2
+    mov     al, 0x82
     out     0x70, al
     in      al, 0x71
     mov     dh, al
 
-    mov     ax, STATE_A_SEGMENT
+    mov     ax, SEGMENT_WORLD_STATE_A
     mov     es, ax
     xor     di, di
 
@@ -145,15 +162,16 @@
 
 %macro INITIALIZE_TIMER 0
     ; Configure the programmable interval timer:
-    ;   Bit 0    (BCD or binary) -   0 - Binary.
-    ;   Bit 1..3 (Mode)          - 010 - Rate generator.
-    ;   Bit 4..5 (Access)        -  11 - Low byte then high byte.
-    ;   Bit 6..7 (Channel)       -  00 - Channel 0 (IRQ0).
+    ;   Bits | Field Name    | Configured Value
+    ;   0    | BCD or Binary |   0 - Binary
+    ;   1..3 | Mode          | 010 - Rate generator
+    ;   4..5 | Access        |  11 - Low byte then high byte
+    ;   6..7 | Channel       |  00 - Channel 0 (IRQ0)
     mov     al, 0b00_11_010_0
     out     0x43, al
 
     ; Set frequency divisor for channel 0.
-    mov     ax, CLOCK_DIVISOR
+    mov     ax, MAX_FREQUENCY_DIVISOR / STEPS_PER_SECOND
     out     0x40, al
     mov     al, ah
     out     0x40, al
@@ -197,25 +215,24 @@
     ;   registers separately provides wrap-around at the edges of the world.
     ;
 
-    mov     ax, VRAM_SEGMENT
+    mov     ax, SEGMENT_VGA_RAM
     mov     ss, ax
 
     xor     cx, cx
     xor     di, di
 
 %%LoopCells:
-    ; CL is needed for shifts, so use BX for cell co-ordinate inside loop body.
+    ; While CX is our cell counter, only BX and BP can be used for indexed
+    ; addressing. Of those, only BX has upper and lower halves, which we can
+    ; use to access the rows of cells above and below (with wrap-around at the
+    ; edges of the world).
     ; BL = Cell X, BH = Cell Y.
     mov     bx, cx
-
-    ;
-    ; Read current cell state and count number of live neighbours.
-    ;
 
     ; AH = Current cell state.
     mov     ah, [bx]
 
-    ; AL = Live neighbour count.
+    ; AL = Number of live neighboring cells.
     mov     al, 0
     add     al, [bx - 1]
     add     al, [bx + 1]
@@ -230,22 +247,21 @@
     add     al, [bx]
     add     al, [bx + 1]
 
-    ; Restore BX.
+    ; CL is now needed as the operand for shift operations, so save CX in BX
+    ; until the end of the loop.
+    ; BL = Cell X, BH = Cell Y.
     mov     bx, cx
 
-    ;
-    ; Use state-transition ruleset to pick next state.
-    ;
-
+    ; Get ready to shift by the calculated number of live neighbors.
     mov     cl, al
 
     ; AL = State-transition ruleset for current state.
-    mov     al, DEAD_TO_LIVE
+    mov     al, DEAD_CELL_TO_LIVE_CELL
 
     test    ah, ah
     jz      %%CellCurrentlyDead
 
-    mov     al, LIVE_TO_LIVE
+    mov     al, LIVE_CELL_TO_LIVE_CELL
 %%CellCurrentlyDead:
 
     ; AL = Next state.
@@ -334,8 +350,8 @@ Start:
     ; CX = Segment containing world state for current time-step.
     ; DX = Segment containing world state the next time-step.
 
-    mov     cx, STATE_A_SEGMENT
-    mov     dx, STATE_B_SEGMENT
+    mov     cx, SEGMENT_WORLD_STATE_A
+    mov     dx, SEGMENT_WORLD_STATE_B
 
 .MainLoop:
     mov     ds, cx
@@ -347,8 +363,8 @@ Start:
     mov     cx, es
     mov     dx, ds
 
-    ; Wait for 18 interval timer ticks (see note by `CLOCK_DIVISOR`).
-    mov     al, 18
+    ; Wait for N timer ticks (see note by `CLOCK_FREQUENCY_HZ`).
+    mov     al, CLOCK_FREQUENCY_HZ / MAX_FREQUENCY_DIVISOR
 
 .TimerDivider:
     sti
