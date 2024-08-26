@@ -1,10 +1,13 @@
+# 3.5-Inch High-Density
+FLOPPY_SIZE := 1440
+
 all: boot.img
 
 %.bin: %.asm
 	nasm -f bin -o $@ $<
 
 boot.img: boot.bin
-	dd of=$@ if=/dev/zero seek=0 bs=1474560 count=1 status=noxfer
+	dd of=$@ if=/dev/zero seek=0 bs=$(FLOPPY_SIZE)K count=1 status=noxfer
 	dd of=$@ if=$< seek=0 bs=512 conv=notrunc status=noxfer
 
 boot.dump: boot.bin

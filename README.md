@@ -57,6 +57,12 @@ Install `nasm` (tested with version `2.15.05`), then build using:
 make all
 ```
 
+Optionally, the size of the floppy disk may be specified in kibibytes (1024-byte units). By default, a 1440 KiB image will be produced, which is a common size for 3.5-inch high-density floppies on the IBM PC (see [list of floppy disk formats on Wikipedia](https://en.wikipedia.org/wiki/List_of_floppy_disk_formats) for other sizes).
+
+```sh
+make all FLOPPY_SIZE=360
+```
+
 ## Running
 
 Install `qemu-system-i386` (tested with version `7.2.90`), then run using:
